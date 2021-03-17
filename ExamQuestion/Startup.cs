@@ -58,7 +58,10 @@ namespace ExamQuestion
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
         public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
         {
-            if (env.IsDevelopment()) app.UseDeveloperExceptionPage();
+            if (env.IsDevelopment())
+                app.UseDeveloperExceptionPage();
+            else
+                app.UseHsts();
 
             //add data to database for testing
             SeedData.CreateSeedData(app.ApplicationServices);
@@ -69,11 +72,12 @@ namespace ExamQuestion
 
             //add these when hosting in production
             //build the vuejs app for prod and copy its output to the wwwroot directory
+            app.UseHttpsRedirection();
             app.UseDefaultFiles();
             app.UseStaticFiles();
-            
-            app.UseEndpoints(endpoints => 
-            { 
+
+            app.UseEndpoints(endpoints =>
+            {
                 endpoints.MapControllers();
                 endpoints.MapHub<AllocationHub>("/allocationHub");
             });
