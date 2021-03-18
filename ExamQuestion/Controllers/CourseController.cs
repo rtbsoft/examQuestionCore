@@ -62,7 +62,8 @@ namespace ExamQuestion.Controllers
             {
                 if (await db.Courses.AnyAsync(c => c.UserId == id))
                     courses = await db.Courses.Where(c =>
-                            c.UserId == id && db.Exams.Any(e => e.CourseId == c.Id && e.Start > DateTime.UtcNow))
+                            c.UserId == id && db.Exams.Any(e =>
+                                e.CourseId == c.Id && e.Start < DateTime.UtcNow.AddMinutes(e.DurationMinutes)))
                         .ToListAsync();
 
                 logger.LogTrace($"Found {courses.Count()} courses for user {id}");
