@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using ExamQuestion.Hubs;
@@ -71,6 +72,80 @@ namespace ExamQuestion.Controllers
 
             return assignments;
         }
+
+        //GET: api/Assignment/Export
+        [HttpGet("Export/{examId}")]
+        public async Task<IActionResult> ExportAssignment(int examId)
+        {
+            IActionResult resp = NotFound();
+
+            try
+            {
+                var userId = await Util.GetLoggedInUser(HttpContext);
+                if (userId > 0)
+                {
+                    //if the logged in user owns this exam
+                    var exam = await db.Exams.FirstOrDefaultAsync(e =>
+                        e.Id == examId && db.Courses.Any(c => e.CourseId == c.Id && c.UserId == userId));
+                    if (exam != null)
+                    {
+                        //get all the assignments that have documents that have questions associated with this exam
+                        var assignments = await db.Assignments.Where(a => db.Documents.Any(d =>
+                                d.Id == a.DocumentId &&
+                                db.Questions.Any(q => q.Id == d.QuestionId && q.ExamId == exam.Id)))
+                            .Include(a => a.Student)
+                            .Include(a => a.Document)
+                            .ThenInclude(d => d.Question)
+                            .OrderBy(a => a.Downloaded)
+                            .ToListAsync();
+
+                        //see what documents each student received
+                        var byStudent = new Dictionary<int, List<Assignment>>();
+                        foreach (var assign in assignments)
+                            if (byStudent.TryGetValue(assign.StudentId, out var a))
+                            {
+                                if (a.All(d => d.DocumentId != assign.DocumentId))
+                                    a.Add(assign);
+                            }
+                            else byStudent.Add(assign.StudentId, new List<Assignment> {assign});
+
+                        //create the csv column header - assume that all students are assigned the same number of questions
+                        var csv = "Student, IP, Time,";
+                        foreach (var a in byStudent.Values.First())
+                            csv += $"\"{a.Document.Question.Description}\",";
+                        csv += Environment.NewLine;
+
+                        //add a record - assume student does not move IP addresses and 
+                        foreach (var a in byStudent.Values)
+                        {
+                            var first = a.First();
+                            csv += $"\"{first.Student.Name}\",{first.Ip},\"{first.Downloaded}\",";
+                            foreach (var d in a)
+                                csv += $"{d.Document.PublicFileName},";
+                            csv += Environment.NewLine;
+                        }
+                        resp = File(Encoding.UTF8.GetBytes(csv.ToCharArray()), "text/csv", $"{exam.Name}.csv");
+                    }
+                    else
+                    {
+                        logger.LogWarning($"Exam {examId} does not belong to {userId}");
+                        resp = BadRequest();
+                    }
+                }
+                else
+                {
+                    logger.LogWarning("Attempt without logging in");
+                    resp = Unauthorized();
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, examId.ToString());
+            }
+
+            return resp;
+        }
+
 
         //POST: api/Assignment/Student
         [HttpPost("Student")]
@@ -153,7 +228,9 @@ namespace ExamQuestion.Controllers
                     await hub.Clients.Groups(userId.ToString())
                         .DocumentsAllocated(new AllocatedMessage
                         {
-                            NumDownloads = await db.Assignments.CountAsync(a => a.StudentId == student.Id && a.DocumentId == documents[0].Id),
+                            NumDownloads =
+                                await db.Assignments.CountAsync(a =>
+                                    a.StudentId == student.Id && a.DocumentId == documents[0].Id),
                             ExamId = exam.Id,
                             CourseName = (await db.Courses.FirstOrDefaultAsync(c => c.Id == exam.CourseId)).Name,
                             ExamName = exam.Name,
