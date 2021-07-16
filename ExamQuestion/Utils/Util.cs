@@ -1,11 +1,14 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.Threading.Tasks;
+
 using Microsoft.AspNetCore.Http;
 
 namespace ExamQuestion.Utils
 {
     public static class Util
     {
+        public const int SQL_CONSTRAINT_VIOLATION = 547;
+
         public static async Task<int> GetLoggedInUser(HttpContext context)
         {
             await context.Session.LoadAsync();

@@ -32,16 +32,31 @@ namespace ExamQuestion.Controllers
         //this should always work, as students will need this for finding their exam
         //note that we don't return the AuthenticationCode in this call, as this is a secret
         [HttpGet]
-        public async Task<IEnumerable<Exam>> Get()
+        public async Task<ActionResult<IEnumerable<Exam>>> Get()
         {
-            IEnumerable<Exam> exams = Array.Empty<Exam>();
-            var userId = await Util.GetLoggedInUser(HttpContext);
+            ActionResult<IEnumerable<Exam>> ar;
 
-            if (userId > 0)
-                exams = await db.Exams.Where(e => db.Courses.Any(c => c.Id == e.CourseId && c.UserId == userId))
-                    .ToListAsync();
+            try
+            {
+                var userId = await Util.GetLoggedInUser(HttpContext);
+                if (userId > 0)
+                {
+                    var exams = await db.Exams.Where(e => db.Courses.Any(c => c.Id == e.CourseId && c.UserId == userId))
+                        .ToListAsync();
 
-            return exams;
+                    logger.LogTrace($"Found {exams.Count} exams for user {userId}");
+                    ar = exams;
+                }
+                else
+                    ar = Unauthorized();
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "");
+                ar = StatusCode(statusCode: 500);
+            }
+
+            return ar;
         }
 
         // GET: api/Exam
@@ -49,17 +64,29 @@ namespace ExamQuestion.Controllers
         //this should always work, as students will need this for finding their exam
         //note that we don't return the AuthenticationCode in this call, as this is a secret
         [HttpGet("course/{courseId}")]
-        public async Task<IEnumerable<Exam>> GetForCourse(int courseId) =>
-            await db.Exams.Where(e => e.CourseId == courseId)
-                .Select(e => new Exam
+        public async Task<ActionResult<IEnumerable<Exam>>> GetForCourse(int courseId)
+        {
+            ActionResult<IEnumerable<Exam>> ar;
+
+            try
+            {
+                ar = await db.Exams.Where(e => e.CourseId == courseId).Select(e => new Exam
                 {
                     Id = e.Id,
                     Name = e.Name,
                     Start = e.Start,
                     DurationMinutes = e.DurationMinutes,
                     CourseId = e.CourseId
-                })
-                .ToListAsync();
+                }).ToListAsync();
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "");
+                ar = StatusCode(statusCode: 500);
+            }
+
+            return ar;
+        }
 
         // POST api/Exam
         [HttpPost]
@@ -96,6 +123,8 @@ namespace ExamQuestion.Controllers
                                 string.IsNullOrWhiteSpace(exam.Name))
                                 resp.ResponseCodes.Add(ResponseCodes.InvalidExamFields);
                         }
+                        else
+                            resp.ResponseCodes.Add(ResponseCodes.InvalidUser);
                     }
                 }
                 else
@@ -107,6 +136,7 @@ namespace ExamQuestion.Controllers
             catch (Exception ex)
             {
                 logger.LogError(ex, $"Failed to add {exam.Name} to course {exam.CourseId}");
+                resp.ResponseCodes.Add(ResponseCodes.InternalError);
             }
 
             return resp;
@@ -130,8 +160,7 @@ namespace ExamQuestion.Controllers
                         var ownsCourse = await doesOwnCourse(exam.CourseId, userId);
 
                         if (ownsCourse && !string.IsNullOrWhiteSpace(newExam.AuthenticationCode) &&
-                            !string.IsNullOrWhiteSpace(newExam.Name) &&
-                            newExam.Start > DateTime.UtcNow)
+                            !string.IsNullOrWhiteSpace(newExam.Name) && newExam.Start > DateTime.UtcNow)
                         {
                             exam.AuthenticationCode = newExam.AuthenticationCode;
                             exam.DurationMinutes = newExam.DurationMinutes;
@@ -155,10 +184,15 @@ namespace ExamQuestion.Controllers
                                     string.IsNullOrWhiteSpace(exam.Name))
                                     resp.ResponseCodes.Add(ResponseCodes.InvalidExamFields);
                             }
+                            else
+                                resp.ResponseCodes.Add(ResponseCodes.InvalidUser);
                         }
                     }
                     else
+                    {
                         logger.LogWarning($"exam {id} not found");
+                        resp.ResponseCodes.Add(ResponseCodes.InvalidExamFields);
+                    }
                 }
                 else
                 {
@@ -169,6 +203,7 @@ namespace ExamQuestion.Controllers
             catch (Exception ex)
             {
                 logger.LogError(ex, $"failed to edit {id}");
+                resp.ResponseCodes.Add(ResponseCodes.InternalError);
             }
 
             return resp;
@@ -198,7 +233,10 @@ namespace ExamQuestion.Controllers
                             logger.LogTrace($"deleted {id}");
                         }
                         else
+                        {
                             logger.LogWarning($"{userId} not owner of exam {id}");
+                            resp.ResponseCodes.Add(ResponseCodes.InvalidExamFields);
+                        }
                     }
                     else
                     {
@@ -216,11 +254,14 @@ namespace ExamQuestion.Controllers
             {
                 if (ex.InnerException is SqlException exception && exception.Number == 547)
                 {
-                    resp.ResponseCodes.Add(ResponseCodes.ExamInUse);
                     logger.LogWarning("Attempt to delete record in use");
+                    resp.ResponseCodes.Add(ResponseCodes.ExamInUse);
                 }
                 else
+                {
                     logger.LogError(ex, $"failed to delete {id}");
+                    resp.ResponseCodes.Add(ResponseCodes.InternalError);
+                }
             }
 
             return resp;

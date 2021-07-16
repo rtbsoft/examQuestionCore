@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+
 using ExamQuestion.Models;
 using ExamQuestion.Utils;
+
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
@@ -34,9 +36,9 @@ namespace ExamQuestion.Controllers
         //this should always work, as students will need this for finding their exam
         //note that we don't return the Student Number in this call, as this is used to verify the accessor identity
         [HttpGet("Course/{courseId}")]
-        public async Task<IEnumerable<Student>> Get(int courseId)
+        public async Task<ActionResult<IEnumerable<Student>>> Get(int courseId)
         {
-            IEnumerable<Student> students = Array.Empty<Student>();
+            ActionResult<IEnumerable<Student>> ar;
 
             try
             {
@@ -44,17 +46,18 @@ namespace ExamQuestion.Controllers
 
                 //if anyone asks, then get student names
                 //if the owner asks, they get the full set of details
-                students = userId > 0 && await doesOwnCourse(courseId, userId)
+                ar = userId > 0 && await doesOwnCourse(courseId, userId)
                     ? await db.Students.Where(s => s.CourseId == courseId).ToListAsync()
                     : await db.Students.Where(s => s.CourseId == courseId)
                         .Select(s => new Student {Id = s.Id, Name = s.Name}).ToListAsync();
             }
             catch (Exception ex)
             {
-                logger.LogError(ex.Message);
+                logger.LogError(ex, "");
+                ar = StatusCode(statusCode: 500);
             }
 
-            return students;
+            return ar;
         }
 
         // POST api/Student
@@ -84,8 +87,8 @@ namespace ExamQuestion.Controllers
                     else
                     {
                         logger.LogWarning($"{userId} {(ownsCourse ? "" : "not")} owner; fields {student}");
-                        if (ownsCourse)
-                            resp.ResponseCodes.Add(ResponseCodes.EmptyStudentFields);
+                        resp.ResponseCodes.Add(
+                            ownsCourse ? ResponseCodes.EmptyStudentFields : ResponseCodes.InvalidUser);
                     }
                 }
                 else
@@ -97,6 +100,7 @@ namespace ExamQuestion.Controllers
             catch (Exception ex)
             {
                 logger.LogError(ex, $"Failed to add {student.Name} to course {student.CourseId}");
+                resp.ResponseCodes.Add(ResponseCodes.InternalError);
             }
 
             return resp;
@@ -134,12 +138,15 @@ namespace ExamQuestion.Controllers
                         else
                         {
                             logger.LogWarning($"{userId} {(ownsCourse ? "" : "not")} owner or invalid data {student}");
-                            if (ownsCourse)
-                                resp.ResponseCodes.Add(ResponseCodes.EmptyStudentFields);
+                            resp.ResponseCodes.Add(
+                                ownsCourse ? ResponseCodes.EmptyStudentFields : ResponseCodes.InvalidUser);
                         }
                     }
                     else
+                    {
                         logger.LogWarning($"student {id} not found");
+                        resp.ResponseCodes.Add(ResponseCodes.EmptyStudentFields);
+                    }
                 }
                 else
                 {
@@ -150,6 +157,7 @@ namespace ExamQuestion.Controllers
             catch (Exception ex)
             {
                 logger.LogError(ex, $"failed to edit {id}");
+                resp.ResponseCodes.Add(ResponseCodes.InternalError);
             }
 
             return resp;
@@ -179,7 +187,10 @@ namespace ExamQuestion.Controllers
                             logger.LogTrace($"deleted {id}");
                         }
                         else
+                        {
                             logger.LogWarning($"{userId} not owner of student {id}");
+                            resp.ResponseCodes.Add(ResponseCodes.InvalidUser);
+                        }
                     }
                     else
                     {
@@ -201,7 +212,10 @@ namespace ExamQuestion.Controllers
                     logger.LogWarning("Attempt to delete record in use");
                 }
                 else
+                {
                     logger.LogError(ex, $"failed to delete {id}");
+                    resp.ResponseCodes.Add(ResponseCodes.InternalError);
+                }
             }
 
             return resp;
@@ -219,7 +233,7 @@ namespace ExamQuestion.Controllers
                 if (file != null)
                 {
                     await file.CopyToAsync(stream);
-                    stream.Seek(0, SeekOrigin.Begin);
+                    stream.Seek(offset: 0, SeekOrigin.Begin);
 
                     using var sr = new StreamReader(stream);
                     var students = await db.Students.Where(s => s.CourseId == courseId).ToListAsync();
@@ -253,10 +267,13 @@ namespace ExamQuestion.Controllers
 
                     ir.Id = 1;
                 }
+                else
+                    ir.ResponseCodes.Add(ResponseCodes.EmptyStudentFields);
             }
             catch (Exception ex)
             {
                 logger.LogError(ex.Message);
+                ir.ResponseCodes.Add(ResponseCodes.InternalError);
             }
 
             return ir;

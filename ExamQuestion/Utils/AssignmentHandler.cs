@@ -1,12 +1,14 @@
-﻿using System;
+﻿using ExamQuestion.Models;
+
+using Microsoft.EntityFrameworkCore;
+
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Net.Http;
 using System.Threading.Tasks;
-using ExamQuestion.Models;
-using Microsoft.EntityFrameworkCore;
 
 namespace ExamQuestion.Utils
 {
@@ -15,7 +17,7 @@ namespace ExamQuestion.Utils
         internal static async Task<MemoryStream> CreateZipArchive(IEnumerable<Document> documents, string studentName)
         {
             await using var ms = new MemoryStream();
-            using var archive = new ZipArchive(ms, ZipArchiveMode.Create, true);
+            using var archive = new ZipArchive(ms, ZipArchiveMode.Create, leaveOpen: true);
 
             foreach (var document in documents)
             {
@@ -29,7 +31,7 @@ namespace ExamQuestion.Utils
                     var zipArchiveEntry = archive.CreateEntry(zipFileName, CompressionLevel.Fastest);
 
                     await using var zipStream = zipArchiveEntry.Open();
-                    await zipStream.WriteAsync(fileBytes, 0, fileBytes.Length);
+                    await zipStream.WriteAsync(fileBytes, offset: 0, fileBytes.Length);
                 }
             }
 
@@ -48,7 +50,8 @@ namespace ExamQuestion.Utils
         }
 
         internal static async Task<List<Document>> GetStudentDocuments(AppDbContext db, Student student, Exam exam,
-            string ip, Random r) => CalcStudentDocuments(await collectAllocationInfo(db, student, exam), ip, r);
+            string ip, Random r) =>
+            CalcStudentDocuments(await collectAllocationInfo(db, student, exam), ip, r);
 
         private static async Task<AllocationInfo> collectAllocationInfo(AppDbContext db, Student student, Exam exam)
         {
@@ -65,7 +68,7 @@ namespace ExamQuestion.Utils
                 ai.Documents.Add(docs);
 
                 foreach (var doc in docs)
-                    ai.Assignments.Add(doc.Id, await db.Assignments.Where(a => a.DocumentId == doc.Id).ToListAsync());
+                    ai.Assignments.Add(doc.Id, (await db.Assignments.Where(a => a.DocumentId == doc.Id).ToListAsync()).Distinct().ToList());
             }
 
             return ai;

@@ -2,8 +2,10 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+
 using ExamQuestion.Models;
 using ExamQuestion.Utils;
+
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
@@ -28,18 +30,32 @@ namespace ExamQuestion.Controllers
         }
 
         [HttpGet]
-        public async Task<IEnumerable<Question>> Get()
+        public async Task<ActionResult<IEnumerable<Question>>> Get()
         {
-            IEnumerable<Question> questions = Array.Empty<Question>();
-            var userId = await Util.GetLoggedInUser(HttpContext);
+            ActionResult<IEnumerable<Question>> ar;
 
-            if (userId > 0)
-                questions = await db.Questions.Where(q =>
-                        db.Exams.Any(e =>
-                            e.Id == q.ExamId && db.Courses.Any(c => e.CourseId == c.Id && c.UserId == userId)))
-                    .ToListAsync();
+            try
+            {
+                var userId = await Util.GetLoggedInUser(HttpContext);
+                if (userId > 0)
+                {
+                    var questions = await db.Questions.Where(q => db.Exams.Any(e =>
+                        e.Id == q.ExamId && db.Courses.Any(c => e.CourseId == c.Id && c.UserId == userId)))
+                        .ToListAsync();
 
-            return questions;
+                    logger.LogTrace($"Found {questions.Count} questions for user {userId}");
+                    ar = questions;
+                }
+                else
+                    ar = Unauthorized();
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "");
+                ar = StatusCode(statusCode: 500);
+            }
+
+            return ar;
         }
 
         // POST api/Question
@@ -67,9 +83,10 @@ namespace ExamQuestion.Controllers
                     }
                     else
                     {
-                        logger.LogWarning($"{userId} not owner");
-                        if (ownsExam)
-                            resp.ResponseCodes.Add(ResponseCodes.InvalidQuestionFields);
+                        logger.LogWarning($"{userId} not owner. Description: {question.Description}");
+                        resp.ResponseCodes.Add(ownsExam
+                            ? ResponseCodes.InvalidQuestionFields
+                            : ResponseCodes.InvalidUser);
                     }
                 }
                 else
@@ -81,6 +98,7 @@ namespace ExamQuestion.Controllers
             catch (Exception ex)
             {
                 logger.LogError(ex, $"Failed to add {question.Description} to exam {question.ExamId}");
+                resp.ResponseCodes.Add(ResponseCodes.InternalError);
             }
 
             return resp;
@@ -115,12 +133,16 @@ namespace ExamQuestion.Controllers
                         {
                             logger.LogWarning(
                                 $"{userId} {(ownsExam ? "" : "not owner")} invalid new description: {newQuestion.Description}");
-                            if (ownsExam)
-                                resp.ResponseCodes.Add(ResponseCodes.InvalidQuestionFields);
+                            resp.ResponseCodes.Add(ownsExam
+                                ? ResponseCodes.InvalidQuestionFields
+                                : ResponseCodes.InvalidUser);
                         }
                     }
                     else
+                    {
                         logger.LogWarning($"question {id} not found");
+                        resp.ResponseCodes.Add(ResponseCodes.InvalidQuestionFields);
+                    }
                 }
                 else
                 {
@@ -131,6 +153,7 @@ namespace ExamQuestion.Controllers
             catch (Exception ex)
             {
                 logger.LogError(ex, $"failed to edit {id}");
+                resp.ResponseCodes.Add(ResponseCodes.InternalError);
             }
 
             return resp;
@@ -161,7 +184,10 @@ namespace ExamQuestion.Controllers
                             logger.LogTrace($"deleted {id}");
                         }
                         else
+                        {
+                            resp.ResponseCodes.Add(ResponseCodes.InvalidUser);
                             logger.LogWarning($"{userId} not owner of question {id}");
+                        }
                     }
                     else
                     {
@@ -183,14 +209,17 @@ namespace ExamQuestion.Controllers
                     logger.LogWarning("Attempt to delete record in use");
                 }
                 else
+                {
+                    resp.ResponseCodes.Add(ResponseCodes.InternalError);
                     logger.LogError(ex, $"failed to delete {id}");
+                }
             }
 
             return resp;
         }
 
         private async Task<bool> doesOwnExam(int examId, int userId) =>
-            await db.Exams.AnyAsync(e =>
-                examId == e.Id && db.Courses.Any(c => e.CourseId == c.Id && c.UserId == userId));
+            await db.Exams.AnyAsync(
+                e => examId == e.Id && db.Courses.Any(c => e.CourseId == c.Id && c.UserId == userId));
     }
 }

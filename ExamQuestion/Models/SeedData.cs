@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Linq;
+
 using ExamQuestion.Utils;
+
 using Microsoft.Extensions.DependencyInjection;
 
 namespace ExamQuestion.Models
@@ -53,7 +55,7 @@ namespace ExamQuestion.Models
                 var exam = context.Exams.FirstOrDefault(u => u.Name == "Midterm");
                 if (exam != null)
                 {
-                    exam.Start = DateTime.UtcNow.AddDays(10);
+                    exam.Start = DateTime.UtcNow.AddDays(value: 10);
                     exam.DurationMinutes = 120;
                     context.SaveChanges();
                 }
@@ -65,7 +67,7 @@ namespace ExamQuestion.Models
                 {
                     CourseId = courseId,
                     AuthenticationCode = "abc",
-                    Start = DateTime.UtcNow.AddDays(10),
+                    Start = DateTime.UtcNow.AddDays(value: 10),
                     DurationMinutes = 120,
                     Name = "Midterm"
                 });

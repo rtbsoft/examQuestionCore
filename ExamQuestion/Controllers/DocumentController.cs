@@ -28,19 +28,33 @@ namespace ExamQuestion.Controllers
         }
 
         [HttpGet]
-        public async Task<IEnumerable<Document>> Get()
+        public async Task<ActionResult<IEnumerable<Document>>> Get()
         {
-            IEnumerable<Document> documents = Array.Empty<Document>();
-            var userId = await Util.GetLoggedInUser(HttpContext);
+            ActionResult<IEnumerable<Document>> ar;
 
-            if (userId > 0)
-                documents = await db.Documents.Where(d =>
-                        db.Questions.Any(q =>
+            try
+            {
+                var userId = await Util.GetLoggedInUser(HttpContext);
+                if (userId > 0)
+                {
+                    var documents = await db.Documents.Where(d => db.Questions.Any(q =>
                             q.Id == d.QuestionId && db.Exams.Any(e =>
                                 e.Id == q.ExamId && db.Courses.Any(c => c.Id == e.CourseId && c.UserId == userId))))
-                    .ToListAsync();
+                        .ToListAsync();
 
-            return documents;
+                    logger.LogTrace($"Found {documents.Count} documents for user {userId}");
+                    ar = documents;
+                }
+                else
+                    ar = Unauthorized();
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "");
+                ar = StatusCode(statusCode: 500);
+            }
+
+            return ar;
         }
 
         // POST api/Document
@@ -58,7 +72,8 @@ namespace ExamQuestion.Controllers
                     var ownsQuestion = await doesOwnQuestion(document.QuestionId, userId);
                     if (ownsQuestion)
                     {
-                        if (!string.IsNullOrWhiteSpace(document.PublicFileName) && !string.IsNullOrWhiteSpace(document.Url))
+                        if (!string.IsNullOrWhiteSpace(document.PublicFileName) &&
+                            !string.IsNullOrWhiteSpace(document.Url))
                         {
                             // ReSharper disable once MethodHasAsyncOverload
                             db.Documents.Add(document);
@@ -74,7 +89,10 @@ namespace ExamQuestion.Controllers
                         }
                     }
                     else
+                    {
                         logger.LogWarning($"User {userId} does not own question {document.QuestionId}");
+                        resp.ResponseCodes.Add(ResponseCodes.InvalidUser);
+                    }
                 }
                 else
                 {
@@ -86,6 +104,7 @@ namespace ExamQuestion.Controllers
             {
                 logger.LogError(ex,
                     $"Failed to add {document.PublicFileName} with link {document.Url} to question {document.QuestionId}");
+                resp.ResponseCodes.Add(ResponseCodes.InternalError);
             }
 
             return resp;
@@ -148,12 +167,16 @@ namespace ExamQuestion.Controllers
                         {
                             logger.LogWarning(
                                 $"{userId} {(ownsQuestion ? "" : "not owner")} invalid new name: {newDoc.PublicFileName}");
-                            if (string.IsNullOrWhiteSpace(newDoc.PublicFileName))
-                                resp.ResponseCodes.Add(ResponseCodes.EmptyDocumentName);
+                            resp.ResponseCodes.Add(string.IsNullOrWhiteSpace(newDoc.PublicFileName)
+                                ? ResponseCodes.EmptyDocumentName
+                                : ResponseCodes.InvalidUser);
                         }
                     }
                     else
+                    {
                         logger.LogWarning($"document {id} not found");
+                        resp.ResponseCodes.Add(ResponseCodes.InvalidDocumentFields);
+                    }
                 }
                 else
                 {
@@ -164,6 +187,7 @@ namespace ExamQuestion.Controllers
             catch (Exception ex)
             {
                 logger.LogError(ex, $"failed to edit {id}");
+                resp.ResponseCodes.Add(ResponseCodes.InternalError);
             }
 
             return resp;
@@ -194,7 +218,10 @@ namespace ExamQuestion.Controllers
                             logger.LogTrace($"deleted {id}");
                         }
                         else
+                        {
                             logger.LogWarning($"{userId} not owner of document {id}");
+                            resp.ResponseCodes.Add(ResponseCodes.InvalidUser);
+                        }
                     }
                     else
                     {
@@ -216,15 +243,18 @@ namespace ExamQuestion.Controllers
                     logger.LogWarning("Attempt to delete record in use");
                 }
                 else
+                {
+                    resp.ResponseCodes.Add(ResponseCodes.InternalError);
                     logger.LogError(ex, $"failed to delete {id}");
+                }
             }
 
             return resp;
         }
 
         private async Task<bool> doesOwnQuestion(int questionId, int userId) =>
-            await db.Questions.AnyAsync(q =>
-                q.Id == questionId && db.Exams.Any(e =>
-                    q.ExamId == e.Id && db.Courses.Any(c => e.CourseId == c.Id && c.UserId == userId)));
+            await db.Questions.AnyAsync(q => q.Id == questionId && db.Exams.Any(e =>
+                q.ExamId == e.Id && db.Courses.Any(c =>
+                    e.CourseId == c.Id && c.UserId == userId)));
     }
 }

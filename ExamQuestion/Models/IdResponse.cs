@@ -31,7 +31,8 @@ namespace ExamQuestion.Models
         QuestionInUse,
         InvalidSchoolFields,
         SchoolInUse,
-        WeakPassword
+        WeakPassword,
+        InternalError
     }
 
     public class IdResponse

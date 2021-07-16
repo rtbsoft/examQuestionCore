@@ -1,8 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+
 using ExamQuestion.Models;
 using ExamQuestion.Utils;
+
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
@@ -29,7 +31,22 @@ namespace ExamQuestion.Controllers
         // GET: api/<SchoolController>
         // always return the list of schools
         [HttpGet]
-        public async Task<IEnumerable<School>> Get() => await db.Schools.ToListAsync();
+        public async Task<ActionResult<IEnumerable<School>>> Get()
+        {
+            ActionResult<IEnumerable<School>> ar;
+
+            try
+            {
+                ar = await db.Schools.ToListAsync();
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "");
+                ar = StatusCode(statusCode: 500);
+            }
+
+            return ar;
+        }
 
         // POST api/<SchoolController>
         [HttpPost]
@@ -66,6 +83,7 @@ namespace ExamQuestion.Controllers
             catch (Exception ex)
             {
                 logger.LogError(ex, $"Failed to add {school.Name}");
+                resp.ResponseCodes.Add(ResponseCodes.InternalError);
             }
 
             return resp;
@@ -101,7 +119,10 @@ namespace ExamQuestion.Controllers
                         }
                     }
                     else
+                    {
                         logger.LogWarning($"school {id} not found");
+                        resp.ResponseCodes.Add(ResponseCodes.InvalidSchoolFields);
+                    }
                 }
                 else
                 {
@@ -112,6 +133,7 @@ namespace ExamQuestion.Controllers
             catch (Exception ex)
             {
                 logger.LogError(ex, $"failed to edit {id}");
+                resp.ResponseCodes.Add(ResponseCodes.InternalError);
             }
 
             return resp;
@@ -157,7 +179,10 @@ namespace ExamQuestion.Controllers
                     logger.LogWarning("Attempt to delete record in use");
                 }
                 else
+                {
                     logger.LogError(ex, $"failed to delete {id}");
+                    resp.ResponseCodes.Add(ResponseCodes.InternalError);
+                }
             }
 
             return resp;

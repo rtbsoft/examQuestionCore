@@ -2,8 +2,10 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+
 using ExamQuestion.Models;
 using ExamQuestion.Utils;
+
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
@@ -31,49 +33,61 @@ namespace ExamQuestion.Controllers
         // return the list of courses for the logged in user
         // these are the ones that can be edited
         [HttpGet]
-        public async Task<IEnumerable<Course>> Get()
+        public async Task<ActionResult<IEnumerable<Course>>> Get()
         {
-            IEnumerable<Course> courses = Array.Empty<Course>();
+            ActionResult<IEnumerable<Course>> ar;
 
             try
             {
                 var userId = await Util.GetLoggedInUser(HttpContext);
                 if (userId > 0)
-                    courses = await db.Courses.Where(c => c.UserId == userId).ToListAsync();
-                logger.LogTrace($"Found {courses.Count()} courses for user {userId}");
+                {
+                    var courses = await db.Courses.Where(c => c.UserId == userId).ToListAsync();
+                    logger.LogTrace($"Found {courses.Count} courses for user {userId}");
+                    ar = courses;
+                }
+                else
+                    ar = Unauthorized();
             }
             catch (Exception ex)
             {
                 logger.LogError(ex, "");
+                ar = StatusCode(statusCode: 500);
             }
 
-            return courses;
+            return ar;
         }
 
         // GET: api/Course
         // return the list of courses for the specified user
         // these are generally only to be viewed
         [HttpGet("user/{id}")]
-        public async Task<IEnumerable<Course>> GetForUser(int id)
+        public async Task<ActionResult<IEnumerable<Course>>> GetForUser(int id)
         {
-            IEnumerable<Course> courses = Array.Empty<Course>();
+            ActionResult<IEnumerable<Course>> ar;
 
             try
             {
                 if (await db.Courses.AnyAsync(c => c.UserId == id))
-                    courses = await db.Courses.Where(c =>
+                {
+                    var courses = await db.Courses.Where(c =>
                             c.UserId == id && db.Exams.Any(e =>
                                 e.CourseId == c.Id && e.Start < DateTime.UtcNow.AddMinutes(e.DurationMinutes)))
                         .ToListAsync();
+                    ar = courses;
 
-                logger.LogTrace($"Found {courses.Count()} courses for user {id}");
+                    logger.LogTrace($"Found {courses.Count} courses for user {id}");
+                }
+                else
+                    ar = Array.Empty<Course>();
             }
             catch (Exception ex)
             {
                 logger.LogError(ex, $"problem retrieving courses for user {id}");
+                ar = StatusCode(500);
             }
 
-            return courses;
+            return ar;
         }
 
         // POST api/Course
@@ -112,6 +126,7 @@ namespace ExamQuestion.Controllers
             catch (Exception ex)
             {
                 logger.LogError(ex, $"Could not add course {course.Name}");
+                resp.ResponseCodes.Add(ResponseCodes.InternalError);
             }
 
             return resp;
@@ -160,6 +175,7 @@ namespace ExamQuestion.Controllers
             catch (Exception ex)
             {
                 logger.LogError(ex, $"Could not update {id}");
+                resp.ResponseCodes.Add(ResponseCodes.InternalError);
             }
 
             return resp;
@@ -202,7 +218,10 @@ namespace ExamQuestion.Controllers
                     logger.LogWarning("Attempt to delete record in use");
                 }
                 else
+                {
+                    resp.ResponseCodes.Add(ResponseCodes.InternalError);
                     logger.LogError(ex, $"failed to delete {id}");
+                }
             }
 
             return resp;

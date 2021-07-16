@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
+
 using Microsoft.AspNetCore.Cryptography.KeyDerivation;
 
 //derived from https://github.com/aspnet/Identity/blob/master/src/Core/PasswordHasher.cs
@@ -40,15 +41,15 @@ namespace ExamQuestion.Utils
             var outputBytes = new byte[HeaderSize + SaltSize + HashSize];
             var salt = new byte[SaltSize];
 
-            RandomNumberGenerator.Create().GetBytes(salt, 0, SaltSize);
+            RandomNumberGenerator.Create().GetBytes(salt, offset: 0, SaltSize);
             var subKey = KeyDerivation.Pbkdf2(password, salt, KeyDerivationPrf.HMACSHA256, IterationCount, HashSize);
 
             writeNetworkByteOrder(outputBytes, AlgorithmOffset, (uint)KeyDerivationPrf.HMACSHA256);
             writeNetworkByteOrder(outputBytes, IterationSizeOffset, IterationCount);
             writeNetworkByteOrder(outputBytes, SaltSizeOffset, SaltSize);
 
-            Buffer.BlockCopy(salt, 0, outputBytes, HeaderSize, SaltSize);
-            Buffer.BlockCopy(subKey, 0, outputBytes, HeaderSize + SaltSize, HashSize);
+            Buffer.BlockCopy(salt, srcOffset: 0, outputBytes, HeaderSize, SaltSize);
+            Buffer.BlockCopy(subKey, srcOffset: 0, outputBytes, HeaderSize + SaltSize, HashSize);
 
             return outputBytes;
         }
@@ -68,10 +69,10 @@ namespace ExamQuestion.Utils
                     hashedPassword.Length == HeaderSize + SaltSize + HashSize)
                 {
                     var salt = new byte[SaltSize];
-                    Buffer.BlockCopy(hashedPassword, HeaderSize, salt, 0, SaltSize);
+                    Buffer.BlockCopy(hashedPassword, HeaderSize, salt, dstOffset: 0, SaltSize);
 
                     var expectedSubKey = new byte[HashSize];
-                    Buffer.BlockCopy(hashedPassword, HeaderSize + SaltSize, expectedSubKey, 0, HashSize);
+                    Buffer.BlockCopy(hashedPassword, HeaderSize + SaltSize, expectedSubKey, dstOffset: 0, HashSize);
 
                     // Hash the incoming password and verify it
                     var actualSubKey = KeyDerivation.Pbkdf2(password, salt, prf, iterationCount, HashSize);

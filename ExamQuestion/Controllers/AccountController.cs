@@ -2,8 +2,10 @@
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Threading.Tasks;
+
 using ExamQuestion.Models;
 using ExamQuestion.Utils;
+
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
@@ -30,18 +32,28 @@ namespace ExamQuestion.Controllers
         }
 
         [HttpGet("User")]
-        public async Task<User> GetUser()
+        public async Task<ActionResult<User>> GetUser()
         {
-            await HttpContext.Session.LoadAsync();
-            var userId = HttpContext.Session.GetInt32("UserId") ?? 0;
-            User matchingUser = null;
+            ActionResult<User> ar;
 
-            if (userId > 0)
-                matchingUser = await db.Users.Select(u =>
-                        new User {Id = u.Id, Name = u.Name, Email = u.Email, SchoolId = u.SchoolId})
-                    .FirstOrDefaultAsync(u => u.Id == userId);
+            try
+            {
+                await HttpContext.Session.LoadAsync();
+                var userId = HttpContext.Session.GetInt32("UserId") ?? 0;
 
-            return matchingUser;
+                ar = userId > 0
+                    ? await db.Users.Select(u =>
+                            new User {Id = u.Id, Name = u.Name, Email = u.Email, SchoolId = u.SchoolId})
+                        .FirstOrDefaultAsync(u => u.Id == userId)
+                    : (ActionResult<User>)Unauthorized();
+            }
+            catch (Exception e)
+            {
+                logger.LogError(e, "Error getting info for logged in user");
+                ar = StatusCode(statusCode: 500);
+            }
+
+            return ar;
         }
 
         [HttpPut("User/{id}")]
@@ -102,6 +114,7 @@ namespace ExamQuestion.Controllers
             catch (Exception ex)
             {
                 logger.LogError(ex, $"failed to update user {user}");
+                ps.ResponseCodes.Add(ResponseCodes.InternalError);
             }
 
             return ps;
@@ -145,7 +158,8 @@ namespace ExamQuestion.Controllers
                     }
                     else
                     {
-                        logger.LogWarning($"user {id} does not exist or attempt to modify another user's password by {userId}");
+                        logger.LogWarning(
+                            $"user {id} does not exist or attempt to modify another user's password by {userId}");
                         ps.ResponseCodes.Add(ResponseCodes.InvalidUser);
                     }
                 }
@@ -158,6 +172,7 @@ namespace ExamQuestion.Controllers
             catch (Exception ex)
             {
                 logger.LogError(ex, $"failed to update password for {id}");
+                ps.ResponseCodes.Add(ResponseCodes.InternalError);
             }
 
             return ps;
@@ -179,8 +194,7 @@ namespace ExamQuestion.Controllers
                 if (!db.Users.Any(u => u.Email == newUser.Email))
                     //check for valid email
                 {
-                    if (!string.IsNullOrWhiteSpace(newUser.Email) &&
-                        !string.IsNullOrWhiteSpace(newUser.Password) &&
+                    if (!string.IsNullOrWhiteSpace(newUser.Email) && !string.IsNullOrWhiteSpace(newUser.Password) &&
                         new EmailAddressAttribute().IsValid(newUser.Email))
                     {
                         if (await PasswordCheck.IsStrong(newUser.Password))
@@ -224,6 +238,7 @@ namespace ExamQuestion.Controllers
             catch (Exception ex)
             {
                 logger.LogError(ex, $"failed to create user {newUser}");
+                ps.ResponseCodes.Add(ResponseCodes.InternalError);
             }
 
             return ps;
@@ -262,6 +277,7 @@ namespace ExamQuestion.Controllers
             catch (Exception ex)
             {
                 logger.LogError(ex, $"Could not log in {user.Email}");
+                ps.ResponseCodes.Add(ResponseCodes.InternalError);
             }
 
             return ps;
@@ -270,7 +286,7 @@ namespace ExamQuestion.Controllers
         [HttpDelete("Logout")]
         public async Task<IdResponse> Logout()
         {
-            var resp = new IdResponse();
+            var ps = new IdResponse();
 
             try
             {
@@ -278,22 +294,23 @@ namespace ExamQuestion.Controllers
                 var userId = HttpContext.Session.GetInt32("userId");
                 HttpContext.Session.Remove("UserId");
                 await HttpContext.Session.CommitAsync();
-                resp.Id = userId ?? 1;
+                ps.Id = userId ?? 1;
 
                 logger.LogTrace($"User {userId} has logged out");
             }
             catch (Exception ex)
             {
                 logger.LogError(ex, "failed to logout");
+                ps.ResponseCodes.Add(ResponseCodes.InternalError);
             }
 
-            return resp;
+            return ps;
         }
 
         [HttpDelete("{id}")]
         public async Task<IdResponse> Delete(int id)
         {
-            var resp = new IdResponse();
+            var ps = new IdResponse();
 
             try
             {
@@ -306,32 +323,35 @@ namespace ExamQuestion.Controllers
                         db.Users.Remove(user);
                         await db.SaveChangesAsync();
 
-                        resp.Id = id;
+                        ps.Id = id;
                     }
                     else
                     {
                         logger.LogWarning($"{userId} attempted to delete {id}");
-                        resp.ResponseCodes.Add(ResponseCodes.DeleteOtherUser);
+                        ps.ResponseCodes.Add(ResponseCodes.DeleteOtherUser);
                     }
                 }
                 else
                 {
                     logger.LogWarning("Attempt without logging in");
-                    resp.ResponseCodes.Add(ResponseCodes.NotLoggedIn);
+                    ps.ResponseCodes.Add(ResponseCodes.NotLoggedIn);
                 }
             }
             catch (Exception ex)
             {
-                if (ex.InnerException is SqlException exception && exception.Number == 547)
+                if (ex.InnerException is SqlException exception && exception.Number == Util.SQL_CONSTRAINT_VIOLATION)
                 {
-                    resp.ResponseCodes.Add(ResponseCodes.UserInUse);
+                    ps.ResponseCodes.Add(ResponseCodes.UserInUse);
                     logger.LogWarning("Attempt to delete record in use");
                 }
                 else
+                {
+                    ps.ResponseCodes.Add(ResponseCodes.InternalError);
                     logger.LogError(ex, $"failed to delete {id}");
+                }
             }
 
-            return resp;
+            return ps;
         }
     }
 }
